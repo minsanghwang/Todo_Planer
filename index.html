@@ -301,25 +301,37 @@ function migrateData(){
 }
 function addMinutes(time,min){const [h,m]=time.split(':').map(Number);let x=h*60+m+Number(min||0);x=((x%1440)+1440)%1440;return pad(Math.floor(x/60))+':'+pad(x%60)}
 function nextPriority(arr){return arr.length?Math.max(...arr.map(x=>Number(x.priority)||0))+1:1}
+function priorityArray(type){return (type==='plan'?state.plans:state.todos).filter(x=>!x.deleted && (type==='plan' || x.status!=='completed')).sort((a,b)=>(Number(a.priority)||999)-(Number(b.priority)||999))}
+function normalizePriorities(type){const arr=priorityArray(type);arr.forEach((x,i)=>x.priority=i+1);saveKey(type==='plan'?'plans':'todos')}
+function setPriority(type,id,newPriority,oldPriority){
+  const arr=priorityArray(type);
+  const item=arr.find(x=>x.id===id);if(!item)return;
+  let target=Math.max(1,Math.min(arr.length,Number(newPriority)||oldPriority||1));
+  arr.splice(arr.indexOf(item),1);arr.splice(target-1,0,item);arr.forEach((x,i)=>x.priority=i+1);
+}
 
 function createPlan(d){
   const p={id:uid(),title:d.title,topicTags:d.tags||[],periodStart:d.startDate,periodEnd:d.endDate,startTime:d.startTime,endTime:d.endTime,durationMinutes:minutesBetween(d.startTime,d.endTime),priority:d.priority||nextPriority(activePlans()),successCriteria:d.successCriteria,improvementNotes:[],history:[],deleted:false,createdAt:nowIso(),updatedAt:nowIso()};
-  state.plans.push(p);saveKey('plans');return p
+  state.plans.push(p);if(d.priority!=null)setPriority('plan',p.id,Number(d.priority),p.priority);saveKey('plans');return p
 }
 function editPlan(id,d){
   const p=state.plans.find(x=>x.id===id);if(!p)return;
+  const oldPriority=Number(p.priority)||1;
   const snapshot={...p,history:undefined};p.history=p.history||[];p.history.push({...snapshot,editedAt:nowIso()});
   Object.assign(p,{title:d.title,topicTags:d.tags||[],periodStart:d.startDate,periodEnd:d.endDate,startTime:d.startTime,endTime:d.endTime,durationMinutes:minutesBetween(d.startTime,d.endTime),successCriteria:d.successCriteria,updatedAt:nowIso()});
+  if(d.priority!=null) setPriority('plan',id,Number(d.priority),oldPriority);
   saveKey('plans')
 }
 function createTodo(d){
   const t={id:uid(),planId:d.planId||null,title:d.title,tags:d.tags||[],periodStart:d.startDate,dueDate:d.endDate,startTime:d.startTime,endTime:d.endTime,durationMinutes:minutesBetween(d.startTime,d.endTime),successCriteria:d.successCriteria,priority:d.priority||nextPriority(activeTodos()),status:'in_progress',completedAt:null,history:[],deleted:false,createdAt:nowIso(),updatedAt:nowIso()};
-  state.todos.push(t);saveKey('todos');return t
+  state.todos.push(t);if(d.priority!=null)setPriority('todo',t.id,Number(d.priority),t.priority);saveKey('todos');return t
 }
 function editTodo(id,d){
   const t=state.todos.find(x=>x.id===id);if(!t)return;
+  const oldPriority=Number(t.priority)||1;
   const snapshot={...t,history:undefined};t.history=t.history||[];t.history.push({...snapshot,editedAt:nowIso()});
   Object.assign(t,{planId:d.planId||null,title:d.title,tags:d.tags||[],periodStart:d.startDate,dueDate:d.endDate,startTime:d.startTime,endTime:d.endTime,durationMinutes:minutesBetween(d.startTime,d.endTime),successCriteria:d.successCriteria,updatedAt:nowIso()});
+  if(d.priority!=null) setPriority('todo',id,Number(d.priority),oldPriority);
   saveKey('todos')
 }
 function deleteItem(type,id){const arr=type==='plan'?state.plans:state.todos;const x=arr.find(v=>v.id===id);if(!x)return;if(!confirm(type==='plan'?'계획을 삭제할까요?':'할 일을 삭제할까요?'))return;x.deleted=true;saveKey(type==='plan'?'plans':'todos');render()}
@@ -394,8 +406,8 @@ function renderTopList(){
 function quickTodoItem(t){return `<div class="quick-item ${t.status==='completed'?'done':''}"><div class="quick-item-main"><div class="quick-item-title">${esc(t.title)}</div><div class="quick-item-meta">${esc(t.dueDate||'-')} · ${esc(t.startTime||'')}–${esc(t.endTime||'')} · ${fmtMinutes(durationOf(t))}${t.planId?' · '+esc(planTitle(t.planId)||'') : ''}</div></div><div style="display:flex;gap:5px"><button class="btn green" style="padding:6px 9px;font-size:11px" onclick="App.toggleTodo('${t.id}')">완료</button><button class="btn secondary" style="padding:6px 9px;font-size:11px" onclick="App.editItem('todo','${t.id}')">수정</button><button class="btn danger" style="padding:6px 9px;font-size:11px" onclick="App.deleteItem('todo','${t.id}')">삭제</button></div></div>`}
 function quickPlanItem(p){const count=activeTodos().filter(t=>t.planId===p.id).length;return `<div class="quick-item"><div class="quick-item-main"><div class="quick-item-title">${esc(p.title)}</div><div class="quick-item-meta">${esc(p.periodStart)} ~ ${esc(p.periodEnd)} · ${esc(p.startTime)}–${esc(p.endTime)} · ${fmtMinutes(durationOf(p))} · 할 일 ${count}개</div></div><div style="display:flex;gap:5px"><button class="btn secondary" style="padding:6px 9px;font-size:11px" onclick="App.editItem('plan','${p.id}')">수정</button><button class="btn danger" style="padding:6px 9px;font-size:11px" onclick="App.deleteItem('plan','${p.id}')">삭제</button></div></div>`}
 function renderPriority(){
-  const todos=activeTodos().filter(t=>t.status!=='completed').slice().sort((a,b)=>(Number(a.priority)||999)-(Number(b.priority)||999));
-  const plans=activePlans();
+  const todos=priorityArray('todo');
+  const plans=priorityArray('plan');
   const todoEl=document.getElementById('todoPriorityList'), planEl=document.getElementById('planPriorityList');
   if(!todoEl||!planEl)return;
   todoEl.innerHTML=todos.length?todos.map((t,i)=>priorityItemHtml('todo',t,i+1)).join(''):'<div class="empty">미완료 할 일이 없습니다.</div>';
@@ -463,7 +475,10 @@ function hydrateComposer(){
   document.getElementById('c_startTime').value=editing?.startTime||'09:00';
   document.getElementById('c_endTime').value=editing?.endTime||'10:00';
   document.getElementById('c_success').value=editing?.successCriteria||'';
-  document.getElementById('c_priority').value=editing?.priority?'auto':'auto';
+  const prioritySelect=document.getElementById('c_priority');
+  const priorityItems=ui.composerType==='plan'?priorityArray('plan'):priorityArray('todo');
+  prioritySelect.innerHTML='<option value="auto">자동(현재 순서)</option>'+priorityItems.map((x,i)=>`<option value="${i+1}">${i+1}위 · ${esc(x.title)}${x.id===editing?.id?' (현재)':''}</option>`).join('');
+  prioritySelect.value=editing?.priority?String(editing.priority):'auto';
   refreshComposerLabels();
 }
 function refreshComposerLabels(){
